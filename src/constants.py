@@ -10,7 +10,13 @@ SUPPORTED_GEMINI_MODELS = (
 DEFAULT_MODEL = "gemini-2.5-flash"
 
 # Report styles and formatting
-TONES = ["Professional", "Academic", "Technical", "Executive"]
+SUPPORTED_REPORT_TONES = (
+    "Professional",
+    "Academic",
+    "Technical",
+    "Executive",
+    "Strategic",
+)
 LENGTHS = ["Short", "Medium", "Detailed"]
 
 # Styling configuration for exports (PDF & PPTX)

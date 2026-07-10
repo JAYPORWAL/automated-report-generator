@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from src.config import config_error, settings
-from src.constants import LENGTHS, SUPPORTED_GEMINI_MODELS, TONES
+from src.constants import LENGTHS, SUPPORTED_GEMINI_MODELS, SUPPORTED_REPORT_TONES
 from src.services.gemini_service import check_service_health
 from src.utils.validators import ValidationError
 from src.workflow.report_workflow import ReportWorkflow
@@ -105,7 +105,7 @@ st.sidebar.markdown("---")
 
 # Settings Selectors
 model_selection = st.sidebar.selectbox("Gemini Model", SUPPORTED_GEMINI_MODELS, index=0)
-tone_selection = st.sidebar.selectbox("Report Tone", TONES, index=0)
+tone_selection = st.sidebar.selectbox("Report Tone", SUPPORTED_REPORT_TONES, index=0)
 length_selection = st.sidebar.selectbox("Report Length", LENGTHS, index=1)
 slide_count = st.sidebar.slider("Number of Presentation Slides", min_value=5, max_value=15, value=8)
 enable_research = st.sidebar.checkbox("Enable Web Research", value=True)

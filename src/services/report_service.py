@@ -38,6 +38,14 @@ class ReportService:
             requirements=requirements or "None",
         )
 
+        if tone.lower() == "strategic":
+            system_instruction += (
+                "\nADDITIONAL STRATEGIC TONE INSTRUCTIONS:\n"
+                "- Focus heavily on business direction.\n"
+                "- Prioritize decisions, trade-offs, risks, market position, and actionable recommendations.\n"
+                "- Use concise executive language."
+            )
+
         # Prepare prompt context
         if research_disabled:
             logger.info("Drafting report with research DISABLED (context-only mode).")

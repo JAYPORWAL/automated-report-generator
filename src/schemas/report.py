@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from src.constants import SUPPORTED_REPORT_TONES
 
 
 class ReportDraft(BaseModel):
@@ -46,3 +48,16 @@ class ReportDraft(BaseModel):
 ## References
 {ref_section}
 """
+
+
+class ReportRequest(BaseModel):
+    topic: str = Field(..., description="The main topic of the report")
+    tone: str = Field(..., description="The tone of the report")
+    length: str = Field(default="Medium", description="The length of the report")
+
+    @field_validator("tone")
+    @classmethod
+    def validate_tone(cls, v: str) -> str:
+        if v not in SUPPORTED_REPORT_TONES:
+            raise ValueError(f"Invalid tone '{v}'. Supported tones are: {SUPPORTED_REPORT_TONES}.")
+        return v

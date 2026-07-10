@@ -103,7 +103,7 @@ class ReportWorkflow:
         )
 
         review_result = self.reviewer_agent.run(
-            draft=draft, research_notes=research_notes, model=review_model
+            draft=draft, research_notes=research_notes, model=review_model, tone=tone
         )
 
         # Step 4: Generating Presentation

@@ -13,7 +13,11 @@ class ReviewService:
         self.gemini_service = gemini_service
 
     def review_report(
-        self, draft: ReportDraft, research_notes: ResearchNotes | None, model: str | None = None
+        self,
+        draft: ReportDraft,
+        research_notes: ResearchNotes | None,
+        model: str | None = None,
+        tone: str = "Professional",
     ) -> ReviewResult:
         """
         Reviews a draft report against research notes, producing a ReviewResult
@@ -40,6 +44,7 @@ class ReviewService:
         )
 
         system_instruction = SYSTEM_PROMPTS["reviewer"]
+        system_instruction += f"\n- You MUST preserve the '{tone}' tone of the draft report in your final improved report."
 
         # Call structured generation (with optionally Pro model if selected)
         review_result = self.gemini_service.generate_structured(
