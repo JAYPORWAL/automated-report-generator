@@ -3,7 +3,10 @@ Constants for the Automated Report Generator application.
 """
 
 # Supported Gemini models
-MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"]
+SUPPORTED_GEMINI_MODELS = (
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+)
 DEFAULT_MODEL = "gemini-2.5-flash"
 
 # Report styles and formatting

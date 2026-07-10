@@ -3,6 +3,8 @@ import os
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from src.constants import SUPPORTED_GEMINI_MODELS
+
 
 class Settings(BaseSettings):
     gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
@@ -18,12 +20,36 @@ class Settings(BaseSettings):
     @field_validator("gemini_model")
     @classmethod
     def validate_gemini_model(cls, v: str) -> str:
-        allowed = ["gemini-2.5-flash", "gemini-2.5-pro"]
-        if v not in allowed:
+        if not v or not v.strip():
             return "gemini-2.5-flash"
-        return v
+
+        cleaned_v = v.strip()
+        if cleaned_v not in SUPPORTED_GEMINI_MODELS:
+            raise ValueError(
+                f"Invalid model name '{cleaned_v}' configured for environment variable GEMINI_MODEL. "
+                f"Supported model values are: {SUPPORTED_GEMINI_MODELS}."
+            )
+        return cleaned_v
 
 
-# Ensure the temp directory exists
-settings = Settings()
-os.makedirs(settings.temp_dir, exist_ok=True)
+# Ensure the temp directory exists, handle configuration validation errors gracefully
+settings = None
+config_error = None
+
+try:
+    settings = Settings()
+    os.makedirs(settings.temp_dir, exist_ok=True)
+except Exception as e:
+    config_error = e
+
+    # Create a fallback settings object with defaults so other imports don't crash
+    class FallbackSettings:
+        gemini_api_key = None
+        tavily_api_key = None
+        gemini_model = "gemini-2.5-flash"
+        log_level = "INFO"
+        temp_dir = "temp_exports"
+        max_topic_length = 500
+        max_research_results = 15
+
+    settings = FallbackSettings()
