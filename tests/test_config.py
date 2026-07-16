@@ -200,3 +200,31 @@ def test_streamlit_handles_config_error_safely(mock_stop, mock_error):
         mock_stop.assert_called_once()
         called_arg = mock_error.call_args[0][0]
         assert "Configuration Error" in called_arg
+
+
+def test_settings_log_level_validator(monkeypatch):
+    monkeypatch.setenv("LOG_LEVEL", "invalid-log-level")
+    with pytest.raises(ValidationError) as exc_info:
+        Settings()
+    assert "Invalid log level" in str(exc_info.value)
+
+
+def test_settings_temp_dir_validator(monkeypatch):
+    monkeypatch.setenv("TEMP_DIR", "   ")
+    with pytest.raises(ValidationError) as exc_info:
+        Settings()
+    assert "Temporary export directory (TEMP_DIR) path cannot be empty" in str(exc_info.value)
+
+
+def test_settings_max_topic_length_validator(monkeypatch):
+    monkeypatch.setenv("MAX_TOPIC_LENGTH", "5")
+    with pytest.raises(ValidationError) as exc_info:
+        Settings()
+    assert "MAX_TOPIC_LENGTH must be between 10 and 2000" in str(exc_info.value)
+
+
+def test_settings_max_research_results_validator(monkeypatch):
+    monkeypatch.setenv("MAX_RESEARCH_RESULTS", "0")
+    with pytest.raises(ValidationError) as exc_info:
+        Settings()
+    assert "MAX_RESEARCH_RESULTS must be between 1 and 50" in str(exc_info.value)

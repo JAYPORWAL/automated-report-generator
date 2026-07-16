@@ -9,7 +9,6 @@ SUPPORTED_GEMINI_MODELS = (
 )
 DEFAULT_MODEL = "gemini-2.5-flash"
 
-# Report styles and formatting
 SUPPORTED_REPORT_TONES = (
     "Professional",
     "Academic",
@@ -17,6 +16,15 @@ SUPPORTED_REPORT_TONES = (
     "Executive",
     "Strategic",
 )
+
+TONE_INSTRUCTIONS = {
+    "Professional": "Use a clear, balanced, objective, and formal business tone suitable for professional settings.",
+    "Academic": "Use a scholarly, rigorous, highly analytical tone with academic vocabulary and objective structure.",
+    "Technical": "Use a detailed, precise, and technical tone, focusing on technical mechanisms, implementation details, and specifications.",
+    "Executive": "Use a high-level summary tone, focusing on bottom-line business impacts, key takeaways, and concise summaries.",
+    "Strategic": "Focus heavily on business direction. Prioritize decisions, trade-offs, risks, market position, and actionable recommendations. Use concise executive language.",
+}
+
 LENGTHS = ["Short", "Medium", "Detailed"]
 
 # Styling configuration for exports (PDF & PPTX)

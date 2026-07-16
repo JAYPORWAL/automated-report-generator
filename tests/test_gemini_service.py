@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import httpx
+
 from src.schemas.report import ReportDraft
 from src.services.gemini_service import GeminiService, check_service_health
 
@@ -8,7 +10,8 @@ from src.services.gemini_service import GeminiService, check_service_health
 def test_gemini_service_client_instantiation(mock_client):
     service = GeminiService(api_key="test-key")
     assert service.client is not None
-    mock_client.assert_called_once_with(api_key="test-key")
+    mock_client.assert_called_once()
+    assert mock_client.call_args[1]["api_key"] == "test-key"
 
 
 @patch("src.services.gemini_service.genai.Client")
@@ -50,8 +53,8 @@ def test_gemini_generate_structured_success(mock_client_class):
 def test_gemini_service_retries_on_failure(mock_client_class):
     mock_client = MagicMock()
     mock_client.models.generate_content.side_effect = [
-        RuntimeError("Temporary error"),
-        RuntimeError("Temporary error"),
+        httpx.TimeoutException("Connection timed out"),
+        httpx.TimeoutException("Connection timed out"),
         MagicMock(text="Hello world"),
     ]
     mock_client_class.return_value = mock_client

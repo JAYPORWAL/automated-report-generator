@@ -1,4 +1,3 @@
-import os
 from unittest.mock import MagicMock, patch
 
 from src.schemas.report import ReportDraft
@@ -100,18 +99,14 @@ def test_workflow_end_to_end_mocked(mock_post, mock_ddg, mock_genai_client):
     results = final_step["results"]
     assert "draft_report" in results
     assert "final_report" in results
-    assert "export_paths" in results
+    assert "export_data" in results
 
-    # Check that export paths are files and exist
-    export_paths = results["export_paths"]
-    assert "report_md" in export_paths
-    assert "report_pdf" in export_paths
-    assert "presentation_pptx" in export_paths
+    # Check that export data contains non-empty buffers/strings
+    export_data = results["export_data"]
+    assert "report_md" in export_data
+    assert "report_pdf" in export_data
+    assert "presentation_pptx" in export_data
 
-    for _name, path in export_paths.items():
-        assert os.path.exists(path)
-        # Clean up files immediately
-        try:
-            os.remove(path)
-        except Exception:
-            pass
+    assert len(export_data["report_md"]) > 0
+    assert len(export_data["report_pdf"]) > 0
+    assert len(export_data["presentation_pptx"]) > 0

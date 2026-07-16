@@ -31,6 +31,37 @@ class Settings(BaseSettings):
             )
         return cleaned_v
 
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        allowed_levels = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+        cleaned = v.strip().upper()
+        if cleaned not in allowed_levels:
+            raise ValueError(f"Invalid log level: '{v}'. Supported: {allowed_levels}")
+        return cleaned
+
+    @field_validator("temp_dir")
+    @classmethod
+    def validate_temp_dir(cls, v: str) -> str:
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Temporary export directory (TEMP_DIR) path cannot be empty.")
+        return cleaned
+
+    @field_validator("max_topic_length")
+    @classmethod
+    def validate_max_topic_length(cls, v: int) -> int:
+        if v < 10 or v > 2000:
+            raise ValueError(f"MAX_TOPIC_LENGTH must be between 10 and 2000. Received: {v}")
+        return v
+
+    @field_validator("max_research_results")
+    @classmethod
+    def validate_max_research_results(cls, v: int) -> int:
+        if v < 1 or v > 50:
+            raise ValueError(f"MAX_RESEARCH_RESULTS must be between 1 and 50. Received: {v}")
+        return v
+
 
 # Ensure the temp directory exists, handle configuration validation errors gracefully
 settings = None

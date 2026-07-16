@@ -1,3 +1,4 @@
+import random
 import time
 from typing import Type, TypeVar
 
@@ -14,6 +15,33 @@ from src.utils.validators import validate_json_string
 T = TypeVar("T", bound=BaseModel)
 
 
+def is_transient_error(e: Exception) -> bool:
+    """
+    Identifies transient network or API errors suitable for retry.
+    Non-transient failures (invalid API keys, missing models, schema conflicts)
+    should fail immediately.
+    """
+    # 1. Connection/read timeouts and network errors
+    if isinstance(e, (httpx.TimeoutException, httpx.NetworkError)):
+        return True
+
+    # 2. Check for Google API errors
+    if isinstance(e, APIError) or "APIError" in type(e).__name__:
+        code = getattr(e, "code", None)
+        if code in (429, 500, 503, 504):
+            return True
+        # Check error message strings for transient triggers
+        msg = str(e).lower()
+        if "rate limit" in msg or "resource exhausted" in msg or "quota" in msg or "timeout" in msg:
+            return True
+
+    # 3. Standard connection exceptions
+    if isinstance(e, (ConnectionResetError, ConnectionRefusedError, ConnectionError)):
+        return True
+
+    return False
+
+
 class GeminiService:
     """Service to handle interactions with the Google Gemini API using the google-genai SDK."""
 
@@ -23,12 +51,25 @@ class GeminiService:
 
     @property
     def client(self) -> genai.Client:
-        """Lazily instantiates the Gemini API Client."""
+        """Lazily instantiates the Gemini API Client with custom httpx timeouts."""
         if not self._client:
             if not self.api_key:
                 raise ValueError("Gemini API key is not configured. Please supply one.")
-            # Set up the Client
-            self._client = genai.Client(api_key=self.api_key)
+
+            # Create custom httpx Client with connection and read timeouts
+            # Connection timeout: 5s, Read timeout: 20s
+            limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
+            timeout = httpx.Timeout(20.0, connect=5.0, read=20.0)
+            custom_httpx = httpx.Client(limits=limits, timeout=timeout)
+
+            # Set up the Client with overall timeout constraints
+            self._client = genai.Client(
+                api_key=self.api_key,
+                http_options=types.HttpOptions(
+                    httpx_client=custom_httpx,
+                    timeout=20000,  # 20 seconds overall timeout in milliseconds
+                ),
+            )
         return self._client
 
     def generate_structured(
@@ -43,7 +84,7 @@ class GeminiService:
     ) -> T:
         """
         Generates content from Gemini, enforcing a structured Pydantic schema output.
-        Implements exponential backoff and timeout fallback handling.
+        Implements exponential backoff with random jitter for transient errors.
         """
         model_name = model or settings.gemini_model
         logger.info(f"Generating structured content using model: {model_name}")
@@ -60,13 +101,17 @@ class GeminiService:
 
         for attempt in range(1, max_retries + 1):
             try:
-                # Wrap execution in a timeout block using httpx to prevent hanging
-                # Google genai SDK uses httpx internally, but we can also use a thread/timer or
-                # let the API throw if a timeout is passed. Since we want strict timeout control,
-                # we call it. If it fails, we catch the exception.
-                logger.debug(f"Gemini API request attempt {attempt} of {max_retries}")
+                # Log structured metadata for traceability
+                logger.info(
+                    "Executing structured Gemini API generation",
+                    extra={
+                        "attempt": attempt,
+                        "max_retries": max_retries,
+                        "model": model_name,
+                        "prompt_length": len(prompt),
+                    },
+                )
 
-                # Call generate_content
                 response = self.client.models.generate_content(
                     model=model_name, contents=prompt, config=config
                 )
@@ -78,19 +123,34 @@ class GeminiService:
                 parsed_data = validate_json_string(response.text)
                 return response_schema.model_validate(parsed_data)
 
-            except (APIError, httpx.HTTPError, ValueError, Exception) as e:
+            except Exception as e:
                 last_exception = e
+
+                # Halt immediately on non-transient failures
+                if not is_transient_error(e):
+                    logger.error(
+                        "Non-transient error encountered during structured generation, raising immediately.",
+                        extra={"error": str(e), "model": model_name},
+                    )
+                    raise e
+
+                # Jitter calculations
+                jitter = random.uniform(0.1, 1.0)
+                backoff_delay = (delay * (2 ** (attempt - 1))) + jitter
+
                 logger.warning(
-                    f"Gemini API request failed on attempt {attempt}: {str(e)}. "
-                    f"Retrying in {delay:.1f}s..."
+                    f"Gemini API structured request failed on attempt {attempt}: {str(e)}. "
+                    f"Retrying in {backoff_delay:.2f}s..."
                 )
                 if attempt < max_retries:
-                    time.sleep(delay)
-                    delay *= 2  # Exponential backoff
+                    time.sleep(backoff_delay)
                 else:
-                    logger.error(f"Gemini API call failed after {max_retries} attempts.")
+                    logger.error(
+                        f"Gemini API structured call failed after {max_retries} attempts.",
+                        extra={"error": str(e), "model": model_name},
+                    )
 
-        # If we failed structured generation, try a fallback: ask for raw text, then parse it manually
+        # Fallback unstructured generation and manual parsing if structured fails
         logger.warning("Attempting fallback unstructured generation and manual parsing...")
         try:
             fallback_config = types.GenerateContentConfig(
@@ -107,7 +167,9 @@ class GeminiService:
                 parsed_data = validate_json_string(response.text)
                 return response_schema.model_validate(parsed_data)
         except Exception as fallback_err:
-            logger.error(f"Fallback generation also failed: {fallback_err}")
+            logger.error(f"Fallback unstructured generation also failed: {fallback_err}")
+            # Raise the original structured generation exception to maintain stack trace integrity
+            raise last_exception from fallback_err
 
         raise last_exception or RuntimeError(
             "Gemini Service failed to generate structured content."
@@ -133,18 +195,42 @@ class GeminiService:
 
         for attempt in range(1, max_retries + 1):
             try:
+                logger.info(
+                    "Executing text Gemini API generation",
+                    extra={
+                        "attempt": attempt,
+                        "max_retries": max_retries,
+                        "model": model_name,
+                        "prompt_length": len(prompt),
+                    },
+                )
+
                 response = self.client.models.generate_content(
                     model=model_name, contents=prompt, config=config
                 )
                 if response.text:
                     return response.text
                 raise ValueError("Received empty text response from Gemini.")
-            except (APIError, httpx.HTTPError, ValueError, Exception) as e:
+            except Exception as e:
                 last_exception = e
-                logger.warning(f"Gemini API call failed on attempt {attempt}: {e}")
+
+                # Halt immediately on non-transient failures
+                if not is_transient_error(e):
+                    logger.error(
+                        "Non-transient error encountered during text generation, raising immediately.",
+                        extra={"error": str(e), "model": model_name},
+                    )
+                    raise e
+
+                # Jitter calculations
+                jitter = random.uniform(0.1, 1.0)
+                backoff_delay = (delay * (2 ** (attempt - 1))) + jitter
+
+                logger.warning(
+                    f"Gemini API text call failed on attempt {attempt}: {e}. Retrying in {backoff_delay:.2f}s..."
+                )
                 if attempt < max_retries:
-                    time.sleep(delay)
-                    delay *= 2
+                    time.sleep(backoff_delay)
                 else:
                     logger.error(f"Gemini API text generation failed after {max_retries} attempts.")
 
@@ -181,7 +267,6 @@ def check_service_health() -> dict:
     if settings.gemini_api_key:
         health["details"]["gemini_key_configured"] = True
     else:
-        # Note: missing key makes it unhealthy since the app requires it
         health["status"] = "unhealthy"
         logger.warning("Gemini API key is not configured in environment.")
 
@@ -207,7 +292,12 @@ def check_service_health() -> dict:
         logger.error("python-pptx library is not installed.")
 
     # 5. Check DuckDuckGo Search fallback dependencies
-    # It is natively implemented using httpx in research_service.py
-    health["details"]["duckduckgo_search_available"] = True
+    try:
+        from ddgs import DDGS  # noqa: F401
+
+        health["details"]["duckduckgo_search_available"] = True
+    except ImportError:
+        health["status"] = "unhealthy"
+        logger.error("ddgs library is not installed.")
 
     return health

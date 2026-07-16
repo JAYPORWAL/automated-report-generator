@@ -9,8 +9,19 @@ load_dotenv()
 
 from src.config import config_error, settings
 from src.constants import LENGTHS, SUPPORTED_GEMINI_MODELS, SUPPORTED_REPORT_TONES
+from src.services.export_service import ExportService
 from src.services.gemini_service import check_service_health
-from src.utils.validators import ValidationError
+from src.utils.logger import logger
+from src.utils.validators import (
+    ValidationError,
+    validate_api_keys,
+    validate_audience,
+    validate_model,
+    validate_requirements,
+    validate_slide_count,
+    validate_tone,
+    validate_topic,
+)
 from src.workflow.report_workflow import ReportWorkflow
 
 # Set Streamlit Page Config
@@ -20,9 +31,16 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
 if config_error:
     st.error(f"❌ Configuration Error: {config_error}")
     st.stop()
+
+# Secure cleanup on startup
+try:
+    ExportService(None, None).cleanup_exports()
+except Exception:
+    pass
 
 # Premium UI CSS injection
 st.markdown(
@@ -40,25 +58,25 @@ st.markdown(
         transition: all 0.3s ease;
     }
     .stButton>button:hover {
-        background-color: #3B82F6;
-        color: white;
+        background-color: #1E293B;
         transform: translateY(-2px);
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
     }
     .status-card {
-        padding: 1rem;
-        border-radius: 8px;
         background-color: white;
-        border-left: 5px solid #3B82F6;
+        padding: 1.5rem;
+        border-radius: 12px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        border: 1px solid #E2E8F0;
         margin-bottom: 1rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
     .metric-value {
-        font-size: 2.5rem;
-        font-weight: bold;
+        font-size: 2rem;
+        font-weight: 700;
         color: #0F172A;
     }
     .metric-label {
-        font-size: 0.9rem;
+        font-size: 0.875rem;
         color: #64748B;
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -69,26 +87,26 @@ st.markdown(
 )
 
 
-# Cache health status check for resources
-@st.cache_resource
-def get_system_health():
+@st.cache_data(ttl=60)
+def get_system_health() -> dict:
+    """Cached wrapper to fetch dependencies and system status."""
     return check_service_health()
 
 
-# Initialize session states
-if "events" not in st.session_state:
-    st.session_state.events = []
+# Initialize Session States
 if "results" not in st.session_state:
     st.session_state.results = None
+if "events" not in st.session_state:
+    st.session_state.events = []
 if "error" not in st.session_state:
     st.session_state.error = None
 
-# Sidebar Content
-st.sidebar.title("🛠️ Configurations")
+# --- SIDEBAR CONTROL PANEL ---
+st.sidebar.title("🛠️ Settings & Status")
+st.sidebar.markdown("Configure report settings and verify connection keys.")
 
-# Gemini Key Input (override environment if provided)
 gemini_key_input = st.sidebar.text_input(
-    "Gemini API Key",
+    "Gemini API Key (Optional)",
     value=os.environ.get("GEMINI_API_KEY", ""),
     type="password",
     help="Provided API key overrides default .env settings.",
@@ -121,22 +139,26 @@ if api_configured:
 else:
     st.sidebar.error("🔴 API Status: Gemini Key Required")
 
-# App Header
+with st.sidebar.expander("🔍 Dependency Health"):
+    for dep, status in health_data.get("details", {}).items():
+        label = dep.replace("_", " ").title()
+        if status:
+            st.write(f"✅ {label}")
+        else:
+            st.write(f"❌ {label}")
+
+# --- MAIN PAGE CONTENT ---
 st.title("📊 Automated Report Generator")
 st.markdown(
-    "Compose comprehensive, fact-checked, publication-ready research reports "
-    "and slide decks using a cooperative multi-agent team."
+    "Generate professional-grade research reports, review audit feedback, and construct "
+    "presentation slide decks using autonomous multi-agent systems."
 )
 
-# Disclaimer/Notice
-st.info(
-    "⚠️ **Disclaimer**: AI-generated content is prone to hallucinations. "
-    "Please review and verify all statements before external publication."
-)
+st.markdown("---")
 
-# Input Panel
+# Input Configuration form block
 with st.container():
-    col1, col2 = st.columns([2, 1])
+    col1, col2 = st.columns(2)
     with col1:
         topic_input = st.text_input(
             "Research Topic",
@@ -168,6 +190,10 @@ with btn_col2:
         st.session_state.events = []
         st.session_state.results = None
         st.session_state.error = None
+        try:
+            ExportService(None, None).cleanup_exports()
+        except Exception:
+            pass
         st.rerun()
 
 # Generation Execution
@@ -176,12 +202,24 @@ if generate_clicked:
     st.session_state.results = None
     st.session_state.events = ["Starting pipeline initialization..."]
 
-    if not topic_input.strip():
-        st.session_state.error = "Please enter a valid research topic."
-    elif not gemini_key_input.strip() and not settings.gemini_api_key:
-        st.session_state.error = "Gemini API key is required. Check sidebar or .env."
-    else:
-        # Create pipeline progress placeholder
+    # 1. Validate all user inputs upfront before launching execution to fail fast
+    try:
+        topic_cleaned = validate_topic(topic_input)
+        validate_api_keys(gemini_key_input or settings.gemini_api_key)
+        tone_cleaned = validate_tone(tone_selection)
+        model_cleaned = validate_model(model_selection)
+        slide_count_cleaned = validate_slide_count(slide_count)
+        audience_cleaned = validate_audience(target_audience)
+        requirements_cleaned = validate_requirements(report_requirements)
+    except ValidationError as val_err:
+        st.session_state.error = str(val_err)
+        st.session_state.events.append(f"[VALIDATION ERROR] {val_err}")
+    except Exception as e:
+        st.session_state.error = f"Configuration validation failed: {e}"
+        st.session_state.events.append(f"[VALIDATION ERROR] {e}")
+
+    # 2. Proceed with workflow only if validation succeeded
+    if not st.session_state.error:
         progress_bar = st.progress(0.0)
         status_text = st.empty()
 
@@ -204,15 +242,15 @@ if generate_clicked:
 
             # Run pipeline
             for progress_update in workflow.execute(
-                topic=topic_input,
-                tone=tone_selection,
+                topic=topic_cleaned,
+                tone=tone_cleaned,
                 length=length_selection,
-                slide_count=slide_count,
+                slide_count=slide_count_cleaned,
                 enable_research=enable_research,
                 user_context=user_context,
-                target_audience=target_audience,
-                report_requirements=report_requirements,
-                model_selection=model_selection,
+                target_audience=audience_cleaned,
+                report_requirements=requirements_cleaned,
+                model_selection=model_cleaned,
             ):
                 step = progress_update["step"]
                 msg = progress_update["message"]
@@ -232,9 +270,14 @@ if generate_clicked:
 
         except ValidationError as val_err:
             st.session_state.error = str(val_err)
-        except Exception as err:
-            st.session_state.error = f"An unexpected pipeline error occurred: {str(err)}"
-            st.session_state.events.append(f"[ERROR] Pipeline halted: {str(err)}")
+            st.session_state.events.append(f"[ERROR] Validation failed: {val_err}")
+        except Exception:
+            logger.exception("Unexpected pipeline failure.")
+            # Use production-safe error message, do not expose raw API responses or tracebacks
+            st.session_state.error = "A pipeline execution error occurred. Please check the logs/app.log file for technical details."
+            st.session_state.events.append(
+                "[ERROR] Pipeline halted due to unexpected system error."
+            )
 
 # Error Banner
 if st.session_state.error:
@@ -281,7 +324,7 @@ with tab_draft:
 with tab_final:
     if st.session_state.results:
         final_report = st.session_state.results["final_report"]
-        export_paths = st.session_state.results["export_paths"]
+        export_data = st.session_state.results["export_data"]
 
         st.markdown(final_report)
 
@@ -299,8 +342,7 @@ with tab_final:
             )
         with dl_col2:
             try:
-                with open(export_paths["report_txt"], "r", encoding="utf-8") as f:
-                    txt_data = f.read()
+                txt_data = export_data["report_txt"]
                 st.download_button(
                     label="Download Plain Text (.txt)",
                     data=txt_data,
@@ -313,8 +355,7 @@ with tab_final:
 
         with dl_col3:
             try:
-                with open(export_paths["report_pdf"], "rb") as f:
-                    pdf_data = f.read()
+                pdf_data = export_data["report_pdf"]
                 st.download_button(
                     label="Download PDF (.pdf)",
                     data=pdf_data,
@@ -331,7 +372,7 @@ with tab_final:
 with tab_feedback:
     if st.session_state.results:
         fb = st.session_state.results["review_summary"]
-        export_paths = st.session_state.results["export_paths"]
+        export_data = st.session_state.results["export_data"]
 
         # Display Score Meter
         score = fb["quality_score"]
@@ -370,7 +411,7 @@ with tab_feedback:
 with tab_presentation:
     if st.session_state.results:
         pres = st.session_state.results["presentation"]
-        export_paths = st.session_state.results["export_paths"]
+        export_data = st.session_state.results["export_data"]
 
         st.markdown(f"## Slide Summary: {pres.title}")
         st.markdown(f"*{pres.subtitle}*")
@@ -388,8 +429,7 @@ with tab_presentation:
         pres_col1, pres_col2 = st.columns(2)
         with pres_col1:
             try:
-                with open(export_paths["presentation_pptx"], "rb") as f:
-                    pptx_data = f.read()
+                pptx_data = export_data["presentation_pptx"]
                 st.download_button(
                     label="Download Presentation (.pptx)",
                     data=pptx_data,
@@ -401,8 +441,7 @@ with tab_presentation:
                 st.error("PPTX file unavailable.")
         with pres_col2:
             try:
-                with open(export_paths["speaker_notes_md"], "r", encoding="utf-8") as f:
-                    notes_txt = f.read()
+                notes_txt = export_data["speaker_notes_md"]
                 st.download_button(
                     label="Download Speaker Notes (MD)",
                     data=notes_txt,

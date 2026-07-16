@@ -103,7 +103,12 @@ class ReportWorkflow:
         )
 
         review_result = self.reviewer_agent.run(
-            draft=draft, research_notes=research_notes, model=review_model, tone=tone
+            draft=draft,
+            research_notes=research_notes,
+            model=review_model,
+            tone=tone,
+            audience=target_audience,
+            requirements=report_requirements,
         )
 
         # Step 4: Generating Presentation
@@ -143,7 +148,7 @@ class ReportWorkflow:
             "suggestions": review_result.suggestions,
         }
 
-        # Prepare exports
+        # Prepare exports on disk
         export_paths = self.export_service.prepare_exports(
             topic=topic,
             research_notes_md=notes_md,
@@ -151,6 +156,24 @@ class ReportWorkflow:
             review_summary_json=review_summary,
             presentation_content=presentation,
         )
+
+        # Read exported files into memory immediately
+        export_data = {}
+        for key, path in export_paths.items():
+            mode = "rb" if key in ("report_pdf", "presentation_pptx") else "r"
+            encoding = None if mode == "rb" else "utf-8"
+            try:
+                with open(path, mode, encoding=encoding) as f:
+                    export_data[key] = f.read()
+            except Exception as e:
+                logger.error(f"Failed to read exported file {path} into memory: {e}")
+                raise RuntimeError(f"Export reading failure on format '{key}'") from e
+
+        # Securely delete all temporary files from the disk
+        try:
+            self.export_service.cleanup_exports()
+        except Exception as e:
+            logger.warning(f"Export directory cleanup warning: {e}")
 
         duration = time.time() - start_time
         logger.info(f"ReportWorkflow completed successfully in {duration:.2f} seconds.")
@@ -165,6 +188,6 @@ class ReportWorkflow:
                 "final_report": review_result.improved_report,
                 "review_summary": review_summary,
                 "presentation": presentation,
-                "export_paths": export_paths,
+                "export_data": export_data,  # Serve files in-memory
             },
         }

@@ -1,8 +1,10 @@
+import re
+
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from src.constants import PPTX_STYLING, SYSTEM_PROMPTS
 from src.services.gemini_service import GeminiService
@@ -15,6 +17,21 @@ class SlideContent(BaseModel):
         ..., description="Max 4-5 concise bullet points (each under 100 characters)"
     )
     speaker_notes: str = Field(..., description="Detailed speaker notes explaining these points")
+
+    @field_validator("bullets")
+    @classmethod
+    def validate_and_truncate_bullets(cls, v: list[str]) -> list[str]:
+        # Limit to max 5 bullets per slide
+        v = v[:5]
+        cleaned_bullets = []
+        for b in v:
+            # Strip duplicate bullet characters (-, *, •)
+            cleaned = b.lstrip("-*• ").strip()
+            # Truncate long bullets (max 120 chars) to prevent layout overflow
+            if len(cleaned) > 120:
+                cleaned = cleaned[:117] + "..."
+            cleaned_bullets.append(cleaned)
+        return cleaned_bullets
 
 
 class PresentationContent(BaseModel):
@@ -105,9 +122,11 @@ class SlideService:
         p2.font.color.rgb = RGBColor(*PPTX_STYLING["secondary_color"])
         p2.space_before = Pt(20)
 
-        # Set speaker notes for title slide
+        # Set speaker notes dynamically
         slide.notes_slide.notes_text_frame.text = (
-            f"Title Slide Notes:\nWelcome everyone. Today we are presenting: {content.title}."
+            f"Presentation: {content.title}\n"
+            f"Context / Subtitle: {content.subtitle}\n"
+            f"Introduction: Welcome the audience and outline the goals of today's review."
         )
 
         # 2. AGENDA SLIDE
@@ -130,17 +149,21 @@ class SlideService:
         )
         c_tf = content_box.text_frame
         c_tf.word_wrap = True
+
+        clean_agenda_items = []
         for i, item in enumerate(content.agenda):
+            # Clean duplicate numbering prefix
+            clean_item = re.sub(r"^\d+[\.\s\-]+", "", item).strip()
+            clean_agenda_items.append(clean_item)
             p = c_tf.paragraphs[0] if i == 0 else c_tf.add_paragraph()
-            p.text = f"{i + 1}. {item}"
+            p.text = f"{i + 1}. {clean_item}"
             p.font.name = PPTX_STYLING["font_body"]
             p.font.size = Pt(18)
             p.font.color.rgb = RGBColor(*PPTX_STYLING["text_color"])
             p.space_after = Pt(14)
 
-        slide.notes_slide.notes_text_frame.text = (
-            "Agenda Slide Notes:\nHere is the brief structure of the sections we will cover today."
-        )
+        agenda_str = ", ".join(clean_agenda_items)
+        slide.notes_slide.notes_text_frame.text = f"Agenda Overview:\nWe will cover the following sections in today's presentation: {agenda_str}."
 
         # 3. CONTENT SLIDES
         for slide_data in content.slides:
@@ -165,10 +188,9 @@ class SlideService:
             c_tf.word_wrap = True
 
             for i, bullet in enumerate(slide_data.bullets):
-                # Clean bullet of leading markdown markers if any
-                clean_bullet = bullet.lstrip("-*• ").strip()
+                # Bullets are already clean due to SlideContent validation
                 p = c_tf.paragraphs[0] if i == 0 else c_tf.add_paragraph()
-                p.text = f"•  {clean_bullet}"
+                p.text = f"•  {bullet}"
                 p.font.name = PPTX_STYLING["font_body"]
                 p.font.size = Pt(16)
                 p.font.color.rgb = RGBColor(*PPTX_STYLING["text_color"])
@@ -187,7 +209,10 @@ class SlideService:
         notes.append(f"# Speaker Notes: {content.title}")
         notes.append(f"Subtitle: {content.subtitle}\n")
         notes.append("## Agenda Slide")
-        notes.append("Welcome and introduce the agenda.\n")
+
+        agenda_items = [re.sub(r"^\d+[\.\s\-]+", "", item).strip() for item in content.agenda]
+        agenda_str = ", ".join(agenda_items)
+        notes.append(f"We will guide you through the following topics: {agenda_str}.\n")
 
         for slide in content.slides:
             notes.append(f"## Slide: {slide.title}")

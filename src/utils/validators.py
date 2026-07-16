@@ -3,6 +3,7 @@ import re
 from urllib.parse import urlparse
 
 from src.config import settings
+from src.constants import SUPPORTED_GEMINI_MODELS, SUPPORTED_REPORT_TONES
 
 
 class ValidationError(Exception):
@@ -67,3 +68,50 @@ def sanitize_filename(filename: str) -> str:
     # Keep only alphanumeric, underscores, hyphens, and dots
     sanitized = re.sub(r"[^\w\-\.]", "_", filename)
     return sanitized
+
+
+def validate_audience(audience: str) -> str:
+    """Validates target audience description length."""
+    cleaned = audience.strip()
+    if len(cleaned) > 500:
+        raise ValidationError(
+            f"Target audience exceeds maximum length of 500 characters. "
+            f"Current length: {len(cleaned)}"
+        )
+    return cleaned
+
+
+def validate_requirements(requirements: str) -> str:
+    """Validates special report requirements description length."""
+    cleaned = requirements.strip()
+    if len(cleaned) > 2000:
+        raise ValidationError(
+            f"Report requirements exceed maximum length of 2000 characters. "
+            f"Current length: {len(cleaned)}"
+        )
+    return cleaned
+
+
+def validate_slide_count(slide_count: int) -> int:
+    """Validates the requested slide count range."""
+    if not (5 <= slide_count <= 15):
+        raise ValidationError(f"Slide count must be between 5 and 15. Received: {slide_count}")
+    return slide_count
+
+
+def validate_tone(tone: str) -> str:
+    """Validates that the selected tone is supported."""
+    if tone not in SUPPORTED_REPORT_TONES:
+        raise ValidationError(
+            f"Invalid tone '{tone}'. Supported tones are: {SUPPORTED_REPORT_TONES}"
+        )
+    return tone
+
+
+def validate_model(model: str) -> str:
+    """Validates that the selected Gemini model is supported."""
+    if model not in SUPPORTED_GEMINI_MODELS:
+        raise ValidationError(
+            f"Invalid model '{model}'. Supported models are: {SUPPORTED_GEMINI_MODELS}"
+        )
+    return model
